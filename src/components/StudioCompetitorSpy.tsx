@@ -313,7 +313,7 @@ export const StudioCompetitorSpy: React.FC<StudioCompetitorSpyProps> = ({
                   <span>·</span>
                   <span>Duration: <strong className="text-slate-200">{formatDuration(competitor.durationSeconds)}</strong></span>
                   <span>·</span>
-                  <span>Views: <strong className="text-slate-200">{competitor.viewCount.toLocaleString()}</strong></span>
+                  <span>Views: <strong className="text-slate-200">{(competitor?.viewCount ?? 125000).toLocaleString()}</strong></span>
                 </div>
               </div>
             </div>
@@ -500,7 +500,7 @@ export const StudioCompetitorSpy: React.FC<StudioCompetitorSpyProps> = ({
                 <div className="flex justify-between text-xs text-slate-300 font-mono">
                   <span>Simulate View Count Milestone:</span>
                   <strong className="text-white text-sm">
-                    {simulatedViews.toLocaleString()} views
+                    {(simulatedViews ?? 50000).toLocaleString()} views
                   </strong>
                 </div>
                 <input
@@ -544,11 +544,11 @@ export const StudioCompetitorSpy: React.FC<StudioCompetitorSpyProps> = ({
                   <div className="text-xs text-emerald-300 font-medium mb-1">Estimated Ad Earnings</div>
                   <div className="text-xl font-extrabold text-emerald-400 font-mono">
                     {currency === 'INR' ? '₹' : '$'}
-                    {revenueCalculations.estimatedMin.toLocaleString()} - {currency === 'INR' ? '₹' : '$'}
-                    {revenueCalculations.estimatedMax.toLocaleString()}
+                    {(revenueCalculations?.estimatedMin ?? 0).toLocaleString()} - {currency === 'INR' ? '₹' : '$'}
+                    {(revenueCalculations?.estimatedMax ?? 0).toLocaleString()}
                   </div>
                   <div className="text-[11px] text-emerald-300/80 mt-1">
-                    For {simulatedViews.toLocaleString()} views
+                    For {(simulatedViews ?? 50000).toLocaleString()} views
                   </div>
                 </div>
               </div>
