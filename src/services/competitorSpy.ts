@@ -39,26 +39,25 @@ export function extractVideoId(url: string): string | null {
   return match && match[1] ? match[1] : null;
 }
 
-export function detectGenre(text: string): CompetitorData['genre'] {
-  const lower = text.toLowerCase();
-  if (/story|stories|kathalu|kahani|animation|cartoon|bedtime|moral|fairytale|kids|మజ్జిగ|బంగారు/i.test(lower)) {
+export function detectGenre(title = '', tags: string[] = []): CompetitorData['genre'] {
+  const combined = (title + ' ' + tags.join(' ')).toLowerCase();
+  if (/story|stories|kathalu|kahani|animation|cartoon|bedtime|moral|fairytale|kids|మజ్జిగ|బంగారు/i.test(combined)) {
     return 'Stories / Animation';
   }
-  if (/how to|tutorial|course|learn|coding|guide|tips|setup|method|python|react|ai|automation|seo|marketing/i.test(lower)) {
+  if (/how to|tutorial|course|learn|coding|guide|tips|setup|method|python|react|ai|automation|seo|marketing/i.test(combined)) {
     return 'Tutorials / Tech';
   }
-  if (/review|vs|comparison|unboxing|price|worth it|test|benchmark|specs|camera|pros and cons/i.test(lower)) {
+  if (/review|vs|comparison|unboxing|price|worth it|test|benchmark|specs|camera|pros and cons/i.test(combined)) {
     return 'Reviews / Products';
   }
   return 'Vlogs / Entertainment';
 }
 
 export function calculateRevenueGuide(
-  views: number,
-  genre: CompetitorData['genre'],
-  isMidroll: boolean
+  views = 50000,
+  genre: CompetitorData['genre'] = 'Vlogs / Entertainment',
+  isMidroll = false
 ): CompetitorData['revenueEst'] {
-  const safeViews = Math.max(1000, views || 50000);
   const benchmark = NICHE_RPM_BENCHMARKS[genre] || NICHE_RPM_BENCHMARKS['Vlogs / Entertainment'];
   const midRollMultiplier = isMidroll ? 1.65 : 1.0;
 
@@ -73,11 +72,13 @@ export function calculateRevenueGuide(
 }
 
 export function generateCounterTitles(
-  title: string,
-  genre: CompetitorData['genre']
+  title = '',
+  genre: CompetitorData['genre'] = 'Vlogs / Entertainment',
+  tags: string[] = []
 ): CompetitorData['counterTitles'] {
-  const isTelugu = /[\u0C00-\u0C7F]/.test(title);
-  const primaryName = title.split(/[-–—|/]/)[0].trim();
+  const safeTitle = title || (tags[0] ?? 'Video Topic');
+  const primaryName = safeTitle.split(/[-–—|/]/)[0].trim() || 'Video Topic';
+  const isTelugu = /[\u0C00-\u0C7F]/.test(safeTitle + ' ' + tags.join(' '));
 
   if (genre === 'Stories / Animation') {
     if (isTelugu) {
@@ -180,31 +181,36 @@ export function generateCounterTitles(
 }
 
 export function auditCompetitorWeaknesses(
-  data: Pick<CompetitorData, 'title' | 'description' | 'tags' | 'totalTagChars' | 'durationSeconds'>
+  title = '',
+  description = '',
+  tags: string[] = [],
+  durationSeconds = 0
 ): CompetitorData['vulnerabilities'] {
   const vulnerabilities: CompetitorData['vulnerabilities'] = [];
+  const safeTitle = title || '';
+  const totalTagChars = tags.join(',').length;
 
   // 1. Mobile Title Cutoff Check
-  if (data.title.length > 55) {
-    const cutChar = data.title.slice(0, 52) + '...';
-    const hiddenPercent = Math.round(((data.title.length - 50) / data.title.length) * 100);
+  if (safeTitle.length > 55) {
+    const cutChar = safeTitle.slice(0, 52) + '...';
+    const hiddenPercent = Math.round(((safeTitle.length - 50) / safeTitle.length) * 100);
     vulnerabilities.push({
       type: 'Mobile Title Cutoff',
-      vulnerability: `Competitor's title is ${data.title.length} characters long. Approximately ${hiddenPercent}% of the title is cut off on mobile devices: "${cutChar}".`,
+      vulnerability: `Competitor's title is ${safeTitle.length} characters long. Approximately ${hiddenPercent}% of the title is cut off on mobile devices: "${cutChar}".`,
       advantage: 'Keep your title under 50 characters to hook viewers immediately on mobile feeds.',
       severity: 'High',
     });
   } else {
     vulnerabilities.push({
       type: 'Mobile Title Length',
-      vulnerability: `Competitor kept their title concise (${data.title.length} characters). It displays fully on mobile.`,
+      vulnerability: `Competitor kept their title concise (${safeTitle.length} characters). It displays fully on mobile.`,
       advantage: 'Match their concise length, but apply a stronger curiosity gap or emotional hook.',
       severity: 'Low',
     });
   }
 
   // 2. Video Chapters Check
-  const hasChapters = /\b\d{1,2}:\d{2}\b/.test(data.description);
+  const hasChapters = /\b\d{1,2}:\d{2}\b/.test(description || '');
   if (!hasChapters) {
     vulnerabilities.push({
       type: 'Missing Video Chapters',
@@ -222,17 +228,17 @@ export function auditCompetitorWeaknesses(
   }
 
   // 3. Tag Character Budget Check
-  if (data.totalTagChars < 350) {
+  if (totalTagChars < 350) {
     vulnerabilities.push({
       type: 'Tag Space Under-Saturation',
-      vulnerability: `Competitor only utilized ${data.totalTagChars} of 500 allowable tag characters (${data.tags.length} tags).`,
-      advantage: `They left ${500 - data.totalTagChars} characters of free search real estate empty! Deploy a saturated 4-Tier Tag Matrix to out-index them.`,
+      vulnerability: `Competitor only utilized ${totalTagChars} of 500 allowable tag characters (${tags.length} tags).`,
+      advantage: `They left ${500 - totalTagChars} characters of free search real estate empty! Deploy a saturated 4-Tier Tag Matrix to out-index them.`,
       severity: 'Medium',
     });
   } else {
     vulnerabilities.push({
       type: 'Tag Saturation',
-      vulnerability: `Competitor utilized their tag box well (${data.totalTagChars} / 500 chars).`,
+      vulnerability: `Competitor utilized their tag box well (${totalTagChars} / 500 chars).`,
       advantage: 'Their tags are saturated. Use exact bridge tags to infiltrate their Suggested Videos rail.',
       severity: 'Low',
     });
@@ -241,12 +247,12 @@ export function auditCompetitorWeaknesses(
   return vulnerabilities;
 }
 
-export function parseRawSourceHtml(rawHtml: string, videoUrl = ''): CompetitorData {
+export function parseRawSourceHtml(rawHtml: string, videoUrl = ''): Partial<CompetitorData> {
   let title = 'Unknown Title';
-  let author = 'Creator Channel';
+  let author = 'Competitor Channel';
   let realTags: string[] = [];
   let description = '';
-  let durationSeconds = 0;
+  let durationSeconds = 540;
   let viewCount = 125000;
 
   // 1. Tags (<meta name="keyword" content="..."> or JSON keywords)
@@ -316,7 +322,7 @@ export function parseRawSourceHtml(rawHtml: string, videoUrl = ''): CompetitorDa
   const videoId = extractVideoId(videoUrl) || 'dQw4w9WgXcQ';
   const totalTagChars = realTags.join(',').length;
   const isMidRollMonetized = durationSeconds >= 480;
-  const genre = detectGenre(`${title} ${realTags.join(' ')}`);
+  const genre = detectGenre(title, realTags);
 
   return {
     url: videoUrl,
@@ -332,63 +338,22 @@ export function parseRawSourceHtml(rawHtml: string, videoUrl = ''): CompetitorDa
     totalTagChars,
     isMidRollMonetized,
     genre,
-    vulnerabilities: auditCompetitorWeaknesses({ title, description, tags: realTags, totalTagChars, durationSeconds }),
-    counterTitles: generateCounterTitles(title, genre),
+    vulnerabilities: auditCompetitorWeaknesses(title, description, realTags, durationSeconds),
+    counterTitles: generateCounterTitles(title, genre, realTags),
     revenueEst: calculateRevenueGuide(viewCount, genre, isMidRollMonetized),
   };
 }
 
-export async function fetchCompetitorViaOEmbed(urlOrId: string): Promise<CompetitorData> {
+export async function fetchCompetitorViaOEmbed(urlOrId: string): Promise<Partial<CompetitorData>> {
   const videoId = extractVideoId(urlOrId) || urlOrId.trim();
   const targetUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
-  // 1. Try Invidious Public API Node first for full metadata
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3500);
-    const res = await fetch(`https://invidious.nerdvpn.de/api/v1/videos/${videoId}`, { signal: controller.signal });
-    clearTimeout(timeout);
-
-    if (res.ok) {
-      const json = await res.json();
-      if (json && json.title) {
-        const rawTags = Array.isArray(json.keywords) ? json.keywords.filter(Boolean) : [];
-        const durationSeconds = parseInt(json.lengthSeconds, 10) || 0;
-        const totalTagChars = rawTags.join(',').length;
-        const isMidRollMonetized = durationSeconds >= 480;
-        const genre = detectGenre(`${json.title} ${rawTags.join(' ')}`);
-        const viewCount = parseInt(json.viewCount, 10) || 125000;
-        const description = json.description || '';
-
-        return {
-          url: targetUrl,
-          videoId,
-          title: json.title,
-          author: json.author || 'Creator Channel',
-          channelUrl: json.authorId ? `https://www.youtube.com/channel/${json.authorId}` : '',
-          thumbnailUrl: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
-          durationSeconds,
-          viewCount,
-          description,
-          tags: rawTags,
-          totalTagChars,
-          isMidRollMonetized,
-          genre,
-          vulnerabilities: auditCompetitorWeaknesses({ title: json.title, description, tags: rawTags, totalTagChars, durationSeconds }),
-          counterTitles: generateCounterTitles(json.title, genre),
-          revenueEst: calculateRevenueGuide(viewCount, genre, isMidRollMonetized),
-        };
-      }
-    }
-  } catch (e) {}
-
-  // 2. Safe Fallback to Public oEmbed (No hardcoded Telugu stories!)
   try {
     const res = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(targetUrl)}&format=json`);
     if (!res.ok) throw new Error('oEmbed unavailable');
     const data = await res.json();
 
-    const title = data.title || 'Unknown Title';
+    const title = data.title || 'Competitor Video';
     const author = data.author_name || 'Creator';
     const fallbackTags = title
       .split(/[-–—|/:,•]/)
@@ -396,7 +361,7 @@ export async function fetchCompetitorViaOEmbed(urlOrId: string): Promise<Competi
       .filter((s: string) => s.length > 2 && s.length <= 40);
 
     const totalTagChars = fallbackTags.join(',').length;
-    const genre = detectGenre(title);
+    const genre = detectGenre(title, fallbackTags);
 
     return {
       url: targetUrl,
@@ -404,17 +369,17 @@ export async function fetchCompetitorViaOEmbed(urlOrId: string): Promise<Competi
       title,
       author,
       channelUrl: data.author_url || '',
-      thumbnailUrl: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
-      durationSeconds: 0,
+      thumbnailUrl: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+      durationSeconds: 540,
       viewCount: 125000,
       description: 'Metadata restricted by YouTube oEmbed. Paste raw view-source in Mode 2 for all real tags.',
       tags: fallbackTags,
       totalTagChars,
-      isMidRollMonetized: false,
+      isMidRollMonetized: true,
       genre,
-      vulnerabilities: auditCompetitorWeaknesses({ title, description: '', tags: fallbackTags, totalTagChars, durationSeconds: 0 }),
-      counterTitles: generateCounterTitles(title, genre),
-      revenueEst: calculateRevenueGuide(125000, genre, false),
+      vulnerabilities: auditCompetitorWeaknesses(title, '', fallbackTags, 540),
+      counterTitles: generateCounterTitles(title, genre, fallbackTags),
+      revenueEst: calculateRevenueGuide(125000, genre, true),
     };
   } catch (e) {
     throw new Error('Unable to inspect video. Please verify the link or paste the view-source HTML in Mode 2.');
