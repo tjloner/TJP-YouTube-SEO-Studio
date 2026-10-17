@@ -1,0 +1,6 @@
+{
+  "name": "TJP YouTube SEO Engine",
+  "description": "High-performance client-side YouTube SEO workstation with live autocomplete expansion, competitor reverse-engineering, on-page score auditing, advertiser safety checks, and Web Audio chapter generator.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
