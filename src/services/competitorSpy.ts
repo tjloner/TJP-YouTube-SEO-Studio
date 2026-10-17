@@ -1,369 +1,120 @@
 import { CompetitorData } from '../types';
 
-export const extractYouTubeVideoId = (url: string): string | null => {
+const NICHE_RPM_BENCHMARKS = {
+  'Stories / Animation': { inrLow: 25, inrHigh: 55, usdLow: 0.30, usdHigh: 0.65 },
+  'Tutorials / Tech': { inrLow: 80, inrHigh: 180, usdLow: 1.00, usdHigh: 2.20 },
+  'Reviews / Products': { inrLow: 100, inrHigh: 250, usdLow: 1.20, usdHigh: 3.00 },
+  'Vlogs / Entertainment': { inrLow: 25, inrHigh: 55, usdLow: 0.30, usdHigh: 0.65 },
+};
+
+export const SAMPLE_HTML_SOURCES: Record<string, string> = {
+  techTutorial: `
+    <title>Complete Python AI Tutorial 2026 - Zero to Hero - CodeCamp</title>
+    <link itemprop="name" content="CodeCamp">
+    <meta name="keyword" content="python tutorial, learn python, ai tutorial, python 2026, machine learning, coding for beginners, python full course, programming tutorial">
+    <meta name="description" content="Master Python and AI in this complete 2026 tutorial. 00:00 - Introduction 05:20 - Python Basics 18:30 - Machine Learning Setup 35:00 - Final Project">
+    <script>var ytInitialPlayerResponse = {"videoDetails":{"videoId":"PyThOn12345","title":"Complete Python AI Tutorial 2026 - Zero to Hero","lengthSeconds":"2450","keywords":["python tutorial","learn python","ai tutorial","python 2026","machine learning","coding for beginners","python full course","programming tutorial"],"viewCount":"245000"}};</script>
+  `,
+  storiesAnimation: `
+    <title>The Golden Fox and The Magic Tree - Moral Bedtime Stories</title>
+    <link itemprop="name" content="FairyTales World">
+    <meta name="keyword" content="moral stories, bedtime story, animated stories, kids fairy tales, animated stories for kids, english stories, moral lessons, bedtime cartoon">
+    <meta name="description" content="Enjoy this classic animated moral bedtime story about the golden fox.">
+    <script>var ytInitialPlayerResponse = {"videoDetails":{"videoId":"StOrY567890","title":"The Golden Fox and The Magic Tree","lengthSeconds":"620","keywords":["moral stories","bedtime story","animated stories","kids fairy tales","animated stories for kids","english stories","moral lessons","bedtime cartoon"],"viewCount":"580000"}};</script>
+  `,
+  vlogsEntertainment: `
+    <title>Surviving 24 Hours in an Abandoned Theme Park - Extreme Vlog</title>
+    <link itemprop="name" content="DareDevils">
+    <meta name="keyword" content="24 hour challenge, abandoned theme park, survival challenge, overnight challenge, extreme vlog, exploration">
+    <meta name="description" content="We spent 24 hours locked inside an abandoned amusement park! Check out our gear: https://gear.example.com">
+    <script>var ytInitialPlayerResponse = {"videoDetails":{"videoId":"VlOg9876543","title":"Surviving 24 Hours in an Abandoned Theme Park","lengthSeconds":"1120","keywords":["24 hour challenge","abandoned theme park","survival challenge","overnight challenge","extreme vlog","exploration"],"viewCount":"1200000"}};</script>
+  `
+};
+
+export function extractVideoId(url: string): string | null {
   if (!url) return null;
   const clean = url.trim();
-  // Standard watch: youtube.com/watch?v=ID
-  const watchMatch = clean.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
-  if (watchMatch) return watchMatch[1];
+  const regExp = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?|shorts)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
+  const match = clean.match(regExp);
+  return match && match[1] ? match[1] : null;
+}
 
-  // Short URL: youtu.be/ID
-  const shortMatch = clean.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
-  if (shortMatch) return shortMatch[1];
-
-  // Shorts: youtube.com/shorts/ID
-  const shortsMatch = clean.match(/shorts\/([a-zA-Z0-9_-]{11})/);
-  if (shortsMatch) return shortsMatch[1];
-
-  // Embed: youtube.com/embed/ID
-  const embedMatch = clean.match(/embed\/([a-zA-Z0-9_-]{11})/);
-  if (embedMatch) return embedMatch[1];
-
-  // Raw 11-char ID
-  if (/^[a-zA-Z0-9_-]{11}$/.test(clean)) return clean;
-
-  return null;
-};
-
-/**
- * Mode 1: Fetch metadata via YouTube's public oEmbed endpoint.
- * Works natively in browser without API keys.
- */
-export const fetchCompetitorViaOEmbed = async (url: string): Promise<Partial<CompetitorData>> => {
-  const videoId = extractYouTubeVideoId(url);
-  if (!videoId) {
-    throw new Error('Invalid YouTube URL. Please provide a valid watch link, youtu.be, or Shorts URL.');
-  }
-
-  const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
-  
-  try {
-    const res = await fetch(oembedUrl);
-    if (!res.ok) {
-      if (res.status === 404) {
-        throw new Error('Video not found. It may be private, deleted, or unlisted.');
-      }
-      throw new Error(`YouTube oEmbed returned HTTP status ${res.status}`);
-    }
-
-    const data = await res.json();
-    return {
-      videoId,
-      url: `https://www.youtube.com/watch?v=${videoId}`,
-      title: data.title || 'Untitled Video',
-      author: data.author_name || 'Creator',
-      channelUrl: data.author_url || '',
-      thumbnailUrl: data.thumbnail_url || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-    };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Unable to connect to YouTube oEmbed service.';
-    throw new Error(msg);
-  }
-};
-
-/**
- * Parse ISO 8601 duration (e.g. PT14M32S) to seconds
- */
-const parseISO8601Duration = (iso: string): number => {
-  const match = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
-  if (!match) return 0;
-  const hours = parseInt(match[1] || '0', 10);
-  const minutes = parseInt(match[2] || '0', 10);
-  const seconds = parseInt(match[3] || '0', 10);
-  return hours * 3600 + minutes * 60 + seconds;
-};
-
-/**
- * Mode 2: Parse raw browser view-source HTML snippet.
- * Extracts title, author, duration, keywords meta tag, views, and description.
- */
-export const parseRawSourceHtml = (rawHtml: string): Partial<CompetitorData> => {
-  if (!rawHtml || rawHtml.length < 10) {
-    throw new Error('Pasted source HTML is too short. Please paste the full HTML or <meta> section.');
-  }
-
-  // 1. Title
-  let title = '';
-  const titleMetaMatch = rawHtml.match(/<meta\s+name="title"\s+content="([^"]+)"/i) ||
-    rawHtml.match(/<title>([^<]+)<\/title>/i) ||
-    rawHtml.match(/"title":\s*"([^"]+)"/);
-  if (titleMetaMatch) {
-    title = titleMetaMatch[1].replace(/ - YouTube$/, '').trim();
-  }
-
-  // 2. Author / Channel
-  let author = '';
-  const authorMatch = rawHtml.match(/<link\s+itemprop="name"\s+content="([^"]+)"/i) ||
-    rawHtml.match(/<meta\s+name="author"\s+content="([^"]+)"/i) ||
-    rawHtml.match(/"ownerChannelName":\s*"([^"]+)"/) ||
-    rawHtml.match(/"channelTitle":\s*"([^"]+)"/);
-  if (authorMatch) {
-    author = authorMatch[1].trim();
-  }
-
-  // 3. Tags / Keywords
-  const tags: string[] = [];
-  const metaKeywordsMatch = rawHtml.match(/<meta\s+name="keywords"\s+content="([^"]+)"/i);
-  if (metaKeywordsMatch) {
-    const split = metaKeywordsMatch[1].split(',').map((s) => s.trim()).filter(Boolean);
-    tags.push(...split);
-  }
-
-  // Also check JSON keywords array: "keywords":["tag1","tag2"]
-  const jsonKeywordsMatch = rawHtml.match(/"keywords":\s*\[(.*?)\]/);
-  if (jsonKeywordsMatch) {
-    try {
-      const parsed = JSON.parse(`[${jsonKeywordsMatch[1]}]`);
-      if (Array.isArray(parsed)) {
-        parsed.forEach((t: unknown) => {
-          const str = String(t).trim();
-          if (str && !tags.includes(str)) tags.push(str);
-        });
-      }
-    } catch {
-      // fallback regex for array items
-      const itemMatches = jsonKeywordsMatch[1].match(/"([^"]+)"/g);
-      if (itemMatches) {
-        itemMatches.forEach((m) => {
-          const cleaned = m.replace(/^"|"$/g, '').trim();
-          if (cleaned && !tags.includes(cleaned)) tags.push(cleaned);
-        });
-      }
-    }
-  }
-
-  // 4. Duration
-  let durationSeconds = 0;
-  const approxDurationMatch = rawHtml.match(/"approxDurationMs":\s*"(\d+)"/);
-  if (approxDurationMatch) {
-    durationSeconds = Math.round(parseInt(approxDurationMatch[1], 10) / 1000);
-  } else {
-    const lengthSecondsMatch = rawHtml.match(/"lengthSeconds":\s*"(\d+)"/);
-    if (lengthSecondsMatch) {
-      durationSeconds = parseInt(lengthSecondsMatch[1], 10);
-    } else {
-      const isoDurationMatch = rawHtml.match(/itemprop="duration"\s+content="([^"]+)"/i);
-      if (isoDurationMatch) {
-        durationSeconds = parseISO8601Duration(isoDurationMatch[1]);
-      }
-    }
-  }
-
-  // 5. Views
-  let viewCount = 45000;
-  const viewMatch = rawHtml.match(/"viewCount":\s*"(\d+)"/);
-  if (viewMatch) {
-    viewCount = parseInt(viewMatch[1], 10);
-  }
-
-  // 6. Description
-  let description = '';
-  const descMatch = rawHtml.match(/<meta\s+name="description"\s+content="([^"]+)"/i) ||
-    rawHtml.match(/"shortDescription":\s*"([^"]+)"/);
-  if (descMatch) {
-    description = descMatch[1].replace(/\\n/g, '\n').trim();
-  }
-
-  // 7. Video ID
-  let videoId = '';
-  const videoIdMatch = rawHtml.match(/"videoId":\s*"([a-zA-Z0-9_-]{11})"/);
-  if (videoIdMatch) {
-    videoId = videoIdMatch[1];
-  }
-
-  return {
-    videoId: videoId || 'dQw4w9WgXcQ',
-    title: title || 'Competitor Target Video',
-    author: author || 'Competitor Channel',
-    durationSeconds: durationSeconds || 540,
-    viewCount,
-    description,
-    tags,
-    thumbnailUrl: videoId
-      ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
-      : 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&q=80',
-  };
-};
-
-/**
- * Detects genre based on keywords, title, and tags
- */
-export const detectGenre = (
-  title: string,
-  tags: string[]
-): CompetitorData['genre'] => {
-  const combined = `${title} ${tags.join(' ')}`.toLowerCase();
-  
-  if (
-    combined.includes('story') ||
-    combined.includes('kathalu') ||
-    combined.includes('moral') ||
-    combined.includes('animation') ||
-    combined.includes('telugu kathalu') ||
-    combined.includes('fairy tale') ||
-    combined.includes('cartoon')
-  ) {
+export function detectGenre(text: string): CompetitorData['genre'] {
+  const lower = text.toLowerCase();
+  if (/story|stories|kathalu|kahani|animation|cartoon|bedtime|moral|fairytale|kids|మజ్జిగ|బంగారు/i.test(lower)) {
     return 'Stories / Animation';
   }
-
-  if (
-    combined.includes('tutorial') ||
-    combined.includes('code') ||
-    combined.includes('how to') ||
-    combined.includes('python') ||
-    combined.includes('ai') ||
-    combined.includes('seo') ||
-    combined.includes('guide') ||
-    combined.includes('software')
-  ) {
+  if (/how to|tutorial|course|learn|coding|guide|tips|setup|method|python|react|ai|automation|seo|marketing/i.test(lower)) {
     return 'Tutorials / Tech';
   }
-
-  if (
-    combined.includes('review') ||
-    combined.includes('unboxing') ||
-    combined.includes('vs') ||
-    combined.includes('camera') ||
-    combined.includes('iphone') ||
-    combined.includes('specs')
-  ) {
+  if (/review|vs|comparison|unboxing|price|worth it|test|benchmark|specs|camera|pros and cons/i.test(lower)) {
     return 'Reviews / Products';
   }
-
   return 'Vlogs / Entertainment';
-};
+}
 
-/**
- * Diagnostic Weakness Audit: The Attack Blueprint
- */
-export const auditCompetitorWeaknesses = (
-  title: string,
-  description: string,
-  tags: string[],
-  durationSeconds: number
-): CompetitorData['vulnerabilities'] => {
-  const weaknesses: CompetitorData['vulnerabilities'] = [];
-  const titleLen = title.length;
-  const tagChars = tags.join(',').length;
-
-  // 1. Mobile Title Cutoff (YouTube mobile truncates around 50-55 chars)
-  if (titleLen > 55) {
-    const cutChars = titleLen - 55;
-    const cutPercent = Math.round((cutChars / titleLen) * 100);
-    weaknesses.push({
-      type: 'Mobile Title Cutoff',
-      vulnerability: `Competitor title is ${titleLen} characters long. Approximately ${cutPercent}% of the title is cut off with '...' on mobile screens.`,
-      advantage: `Front-load your target keyword in the first 45 characters so 100% of mobile users see your primary hook immediately.`,
-      severity: 'High',
-    });
-  }
-
-  // 2. Missing Video Chapters (loss of Google Search Key Moments)
-  const hasChapters = /0?0:00/.test(description) && /\d{1,2}:\d{2}/.test(description);
-  if (!hasChapters && durationSeconds > 180) {
-    weaknesses.push({
-      type: 'Missing Video Chapters',
-      vulnerability: `Competitor video lacks '00:00' timestamp chapters in description, forfeiting rich Google Search 'Key Moments' carousel placements.`,
-      advantage: `Include at least 4 clear timestamp chapters starting at 00:00 to siphon rich snippet organic traffic from Google Search.`,
-      severity: 'High',
-    });
-  }
-
-  // 3. Tag Space Under-Saturation
-  if (tagChars < 350) {
-    const wastedChars = 500 - tagChars;
-    weaknesses.push({
-      type: 'Tag Space Under-Saturation',
-      vulnerability: `Competitor only utilized ${tagChars} of 500 allowable tag characters (${wastedChars} characters left unranked).`,
-      advantage: `Deploy a saturated 4-Tier Tag Matrix up to 495 characters with exact synonyms to capture adjacent suggested video slots.`,
-      severity: 'Medium',
-    });
-  }
-
-  // 4. Description First 120-Chars Hook Check
-  const first120 = description.slice(0, 120).toLowerCase();
-  const lacksCta = !first120.includes('http') && !first120.includes('watch') && !first120.includes('subscribe');
-  if (lacksCta) {
-    weaknesses.push({
-      type: 'Weak Mobile Description Hook',
-      vulnerability: `First 120 characters before 'Show More' lack clear call-to-action or keyword prominence.`,
-      advantage: `Position your core keyword, value proposition, and primary link within the first 110 characters.`,
-      severity: 'Medium',
-    });
-  }
-
-  // 5. Short Video Missing Mid-Roll Monetization
-  if (durationSeconds < 480 && durationSeconds > 300) {
-    const diff = 480 - durationSeconds;
-    const mins = Math.ceil(diff / 60);
-    weaknesses.push({
-      type: 'Sub-8 Minute Monetization Gap',
-      vulnerability: `Video is only ${(durationSeconds / 60).toFixed(1)} mins, missing YouTube's 8-minute mid-roll ad threshold.`,
-      advantage: `Expand your video depth to 8:15+ minutes with an actionable case study to unlock 1.65× revenue per 1,000 views.`,
-      severity: 'Low',
-    });
-  }
-
-  return weaknesses;
-};
-
-/**
- * Genre-Smart Counter-Title Generator
- */
-export const generateCounterTitles = (
-  originalTitle: string,
+export function calculateRevenueGuide(
+  views: number,
   genre: CompetitorData['genre'],
-  tags: string[]
-): CompetitorData['counterTitles'] => {
-  const rootTopic = originalTitle.split(/[:|\-–]/)[0].trim();
-  const cleanTopic = rootTopic.replace(/(tutorial|how to|review|in hindi|telugu lo)/gi, '').trim() || 'This';
+  isMidroll: boolean
+): CompetitorData['revenueEst'] {
+  const safeViews = Math.max(1000, views || 50000);
+  const benchmark = NICHE_RPM_BENCHMARKS[genre] || NICHE_RPM_BENCHMARKS['Vlogs / Entertainment'];
+  const midRollMultiplier = isMidroll ? 1.65 : 1.0;
+
+  return {
+    niche: genre,
+    minRPM_INR: Math.round(benchmark.inrLow * midRollMultiplier),
+    maxRPM_INR: Math.round(benchmark.inrHigh * midRollMultiplier),
+    minRPM_USD: Number((benchmark.usdLow * midRollMultiplier).toFixed(2)),
+    maxRPM_USD: Number((benchmark.usdHigh * midRollMultiplier).toFixed(2)),
+    midRollMultiplier,
+  };
+}
+
+export function generateCounterTitles(
+  title: string,
+  genre: CompetitorData['genre']
+): CompetitorData['counterTitles'] {
+  const isTelugu = /[\u0C00-\u0C7F]/.test(title);
+  const primaryName = title.split(/[-–—|/]/)[0].trim();
 
   if (genre === 'Stories / Animation') {
-    return [
-      {
-        category: 'Narrative Mystery & Twist',
-        title: `${cleanTopic}: The Untold Secret Ending (Nobody Expected This)`,
-        rationale: 'Creates an irresistible curiosity gap that challenges the competitor’s conventional ending.',
-      },
-      {
-        category: 'Sequel / Part 2 Hook',
-        title: `${cleanTopic} Part 2: What Happened 10 Years Later?`,
-        rationale: 'Captures viewers seeking continuation immediately after watching the competitor video.',
-      },
-      {
-        category: 'Regional Telugu / Native Hook',
-        title: `${cleanTopic} - Asalu Em Jarigindi? (Hidden Moral Explained in Telugu)`,
-        rationale: 'Appeals directly to regional regional-language viewers seeking deeper emotional closure.',
-      },
-      {
-        category: 'Hidden Truth / Analysis',
-        title: `The Shocking Truth Behind ${cleanTopic} (Animated Breakdown)`,
-        rationale: 'Positions your upload as the definitive documentary-style analysis of the story.',
-      },
-    ];
-  }
+    if (isTelugu) {
+      return [
+        {
+          category: '🎬 పార్ట్ 2 / సీక్వెల్ హుక్',
+          title: `${primaryName} పార్ట్ 2 (Untold Sequel Story)`,
+          rationale: 'ఈ కథ చూసిన ప్రేక్షకులు వెంటనే నెక్స్ట్ పార్ట్ కోసం సెర్చ్ చేస్తారు. వాళ్ళని గ్రాబ్ చేసే హై-డిమాండ్ హుక్.',
+        },
+        {
+          category: '🎭 కథ లో అసలు నిజం & మిస్టరీ ట్విస్ట్',
+          title: `${primaryName} లో దాగి ఉన్న అసలు నిజం! (Shocking Ending)`,
+          rationale: 'కథ తెలిసిన వాళ్ళు కూడా "ఇందులో ఏం కొత్త ట్విస్ట్ ఉంది?" అని ఆసక్తితో క్లిక్ చేస్తారు.',
+        },
+        {
+          category: '💡 దాగి ఉన్న అసలైన నీతి',
+          title: `ఈ కథలో ఎవ్వరికీ తెలియని నీతి ఇదే! (Moral Story 2026)`,
+          rationale: 'తల్లిదండ్రులు మరియు ఉపాధ్యాయులు మంచి మెసేజ్ కోసం వెతికేటప్పుడు ఇది టాప్ లో ర్యాంక్ అవుతుంది.',
+        },
+      ];
+    }
 
-  if (genre === 'Tutorials / Tech') {
     return [
       {
-        category: 'Contrarian Authority',
-        title: `Stop Doing ${cleanTopic} Like This (Why 90% Fail in 2026)`,
-        rationale: 'Disrupts the viewer’s complacency and frames existing tutorials as outdated or suboptimal.',
+        category: '🎬 The Sequel / Next Chapter',
+        title: `${primaryName} Part 2: What Happened Next?`,
+        rationale: 'Captures audience momentum searching for continuation and sequels.',
       },
       {
-        category: 'Speed Blueprint',
-        title: `Master ${cleanTopic} in 8 Minutes (Step-by-Step Blueprint)`,
-        rationale: 'Promises maximum knowledge density without the fluff of 30-minute tutorials.',
+        category: '🎭 The Untold Secret Twist',
+        title: `${primaryName}: The Shocking Truth Nobody Told You`,
+        rationale: 'Promises an unexpected twist on the familiar narrative to pull higher CTR.',
       },
       {
-        category: 'Proof & Field-Tested',
-        title: `I Tested Every ${cleanTopic} Method: Here Is What Actually Works`,
-        rationale: 'Builds immediate credibility by presenting genuine comparative experimentation.',
-      },
-      {
-        category: 'Beginner to Advanced',
-        title: `${cleanTopic} Complete Roadmap (Zero to Advanced Production)`,
-        rationale: 'Evergreen pillar content that gathers high search intent and long watch time.',
+        category: '💡 The Real Moral Explained',
+        title: `The Real Moral Behind The ${primaryName} Story (Explained)`,
+        rationale: 'Attracts viewers searching for deeper meaning and educational context.',
       },
     ];
   }
@@ -371,129 +122,301 @@ export const generateCounterTitles = (
   if (genre === 'Reviews / Products') {
     return [
       {
-        category: 'Brutal Honesty',
-        title: `${cleanTopic} Review After 30 Days: Do NOT Buy Until You Watch This`,
-        rationale: 'High buyer-intent phrase that prevents instant regret and boosts click-through rate.',
+        category: '⚠️ Brutal Truth Warning',
+        title: `Why I Stopped Recommending ${primaryName} (Don't Buy Yet)`,
+        rationale: 'Triggers loss aversion for shoppers considering a purchase.',
       },
       {
-        category: 'Direct Head-to-Head',
-        title: `${cleanTopic} vs The Competition: The Real Winner Revealed`,
-        rationale: 'Siphons comparison search queries from shoppers deciding between choices.',
+        category: '📊 30-Day Long-Term Test',
+        title: `${primaryName} After 30 Days of Real Use (The Honest Truth)`,
+        rationale: 'Beats generic unboxings with real-world durability and reliability data.',
       },
       {
-        category: 'Long-Term Durability',
-        title: `${cleanTopic}: 6 Months Later (What Other Reviews Won't Tell You)`,
-        rationale: 'Positions the review as genuine real-world testing rather than an unboxing first impression.',
-      },
-      {
-        category: 'Budget Value Check',
-        title: `Is ${cleanTopic} Still Worth It in 2026? (Honest Verdict)`,
-        rationale: 'Attracts both new buyers and users considering refurbished or previous-generation options.',
+        category: '⚔️ The Alternative Showdown',
+        title: `${primaryName} vs The Competition: Is It Still Worth It?`,
+        rationale: 'Directly captures undecided buyers comparing options.',
       },
     ];
   }
 
-  // Entertainment / Vlogs
-  return [
-    {
-      category: 'Behind-The-Scenes Truth',
-      title: `What Really Happened During ${cleanTopic} (Uncut Reaction)`,
-      rationale: 'Offers insider perspective and emotional authenticity that the competitor omitted.',
-    },
-    {
-      category: 'Extreme Challenge',
-      title: `Surviving ${cleanTopic} for 24 Hours Straight`,
-      rationale: 'Standard viral format that maximizes retention across broad demographics.',
-    },
-    {
-      category: 'Viewer Debate',
-      title: `Was ${cleanTopic} Actually Worth It? (My Final Confession)`,
-      rationale: 'Ignites discussion in the comments, boosting algorithmic engagement signals.',
-    },
-  ];
-};
-
-/**
- * Niche RPM and Mid-Roll Ad revenue calculations
- */
-export const calculateRevenueGuide = (
-  genre: CompetitorData['genre'],
-  durationSeconds: number,
-  views: number,
-  currency: 'INR' | 'USD' = 'INR'
-) => {
-  const isMidRoll = durationSeconds >= 480;
-  const midRollMultiplier = isMidRoll ? 1.65 : 1.0;
-
-  // Real RPM benchmarks
-  let minRPM_INR = 30;
-  let maxRPM_INR = 65;
-  let minRPM_USD = 0.35;
-  let maxRPM_USD = 0.75;
-
-  if (genre === 'Stories / Animation') {
-    minRPM_INR = 30;
-    maxRPM_INR = 65;
-    minRPM_USD = 0.35;
-    maxRPM_USD = 0.75;
-  } else if (genre === 'Tutorials / Tech') {
-    minRPM_INR = 80;
-    maxRPM_INR = 180;
-    minRPM_USD = 1.0;
-    maxRPM_USD = 2.2;
-  } else if (genre === 'Reviews / Products') {
-    minRPM_INR = 90;
-    maxRPM_INR = 210;
-    minRPM_USD = 1.1;
-    maxRPM_USD = 2.5;
-  } else {
-    // Vlogs / Entertainment
-    minRPM_INR = 25;
-    maxRPM_INR = 55;
-    minRPM_USD = 0.3;
-    maxRPM_USD = 0.65;
+  if (genre === 'Tutorials / Tech') {
+    return [
+      {
+        category: '🔥 The Direct Contrarian',
+        title: `Stop Doing ${primaryName} The Old Way: Do This Instead`,
+        rationale: 'Challenges outdated advice and triggers fear of missing the modern method.',
+      },
+      {
+        category: '⚡ The Speed & Zero-Friction Hook',
+        title: `${primaryName} in 8 Minutes: The Simple Blueprint Anyone Can Copy`,
+        rationale: 'Promises the same transformation in a fraction of the time.',
+      },
+      {
+        category: '📊 The Hard Proof & Data Hook',
+        title: `I Tested ${primaryName} for 30 Days (Here Are The Real Results)`,
+        rationale: 'Beats generic theoretical guides with undeniable empirical proof.',
+      },
+    ];
   }
 
-  const thousandsOfViews = views / 1000;
-  const estimatedMinINR = Math.round(thousandsOfViews * minRPM_INR * midRollMultiplier);
-  const estimatedMaxINR = Math.round(thousandsOfViews * maxRPM_INR * midRollMultiplier);
+  // Default: Vlogs / Entertainment
+  return [
+    {
+      category: '👀 Behind The Scenes Twist',
+      title: `What Really Happened During ${primaryName} (Uncut)`,
+      rationale: 'Offers insider perspective and emotional authenticity to beat standard vlogs.',
+    },
+    {
+      category: '⚡ Extreme Challenge',
+      title: `Surviving ${primaryName} For 24 Hours Straight`,
+      rationale: 'Standard viral format that dramatically increases retention across demographics.',
+    },
+    {
+      category: '💬 The Honest Confession',
+      title: `The Truth About ${primaryName} (My Final Confession)`,
+      rationale: 'High intimacy and curiosity hook generating immediate click-through.',
+    },
+  ];
+}
 
-  const estimatedMinUSD = Number((thousandsOfViews * minRPM_USD * midRollMultiplier).toFixed(2));
-  const estimatedMaxUSD = Number((thousandsOfViews * maxRPM_USD * midRollMultiplier).toFixed(2));
+export function auditCompetitorWeaknesses(
+  data: Pick<CompetitorData, 'title' | 'description' | 'tags' | 'totalTagChars' | 'durationSeconds'>
+): CompetitorData['vulnerabilities'] {
+  const vulnerabilities: CompetitorData['vulnerabilities'] = [];
+
+  // 1. Mobile Title Cutoff Check
+  if (data.title.length > 55) {
+    const cutChar = data.title.slice(0, 52) + '...';
+    const hiddenPercent = Math.round(((data.title.length - 50) / data.title.length) * 100);
+    vulnerabilities.push({
+      type: 'Mobile Title Cutoff',
+      vulnerability: `Competitor's title is ${data.title.length} characters long. Approximately ${hiddenPercent}% of the title is cut off on mobile devices: "${cutChar}".`,
+      advantage: 'Keep your title under 50 characters to hook viewers immediately on mobile feeds.',
+      severity: 'High',
+    });
+  } else {
+    vulnerabilities.push({
+      type: 'Mobile Title Length',
+      vulnerability: `Competitor kept their title concise (${data.title.length} characters). It displays fully on mobile.`,
+      advantage: 'Match their concise length, but apply a stronger curiosity gap or emotional hook.',
+      severity: 'Low',
+    });
+  }
+
+  // 2. Video Chapters Check
+  const hasChapters = /\b\d{1,2}:\d{2}\b/.test(data.description);
+  if (!hasChapters) {
+    vulnerabilities.push({
+      type: 'Missing Video Chapters',
+      vulnerability: 'Competitor video lacks 00:00 timestamps in description, forfeiting Google Search "Key Moments" carousel placement.',
+      advantage: 'Include structured chapter timestamps to gain Google Search rich snippets.',
+      severity: 'High',
+    });
+  } else {
+    vulnerabilities.push({
+      type: 'Video Chapters Present',
+      vulnerability: 'Competitor utilized chapter timestamps in their description.',
+      advantage: 'Use keyword-rich chapter titles rather than generic markers to out-rank them.',
+      severity: 'Low',
+    });
+  }
+
+  // 3. Tag Character Budget Check
+  if (data.totalTagChars < 350) {
+    vulnerabilities.push({
+      type: 'Tag Space Under-Saturation',
+      vulnerability: `Competitor only utilized ${data.totalTagChars} of 500 allowable tag characters (${data.tags.length} tags).`,
+      advantage: `They left ${500 - data.totalTagChars} characters of free search real estate empty! Deploy a saturated 4-Tier Tag Matrix to out-index them.`,
+      severity: 'Medium',
+    });
+  } else {
+    vulnerabilities.push({
+      type: 'Tag Saturation',
+      vulnerability: `Competitor utilized their tag box well (${data.totalTagChars} / 500 chars).`,
+      advantage: 'Their tags are saturated. Use exact bridge tags to infiltrate their Suggested Videos rail.',
+      severity: 'Low',
+    });
+  }
+
+  return vulnerabilities;
+}
+
+export function parseRawSourceHtml(rawHtml: string, videoUrl = ''): CompetitorData {
+  let title = 'Unknown Title';
+  let author = 'Creator Channel';
+  let realTags: string[] = [];
+  let description = '';
+  let durationSeconds = 0;
+  let viewCount = 125000;
+
+  // 1. Tags (<meta name="keyword" content="..."> or JSON keywords)
+  const metaTagMatch = rawHtml.match(/(?:name|property)=["']keywords?["']\s+content=["']([^"']*)["']/i) ||
+                       rawHtml.match(/content=["']([^"']*)["']\s+(?:name|property)=["']keywords?["']/i);
+  if (metaTagMatch && metaTagMatch[1]) {
+    realTags = metaTagMatch[1].split(',').map((t) => t.trim()).filter(Boolean);
+  }
+
+  if (realTags.length === 0) {
+    const jsonKeywords = rawHtml.match(/"keywords":\s*(\[[^\]]+\])/);
+    if (jsonKeywords && jsonKeywords[1]) {
+      try {
+        const parsed = JSON.parse(jsonKeywords[1]);
+        if (Array.isArray(parsed)) realTags = parsed.filter(Boolean);
+      } catch (e) {}
+    }
+  }
+
+  // 2. Title
+  const titleMatch = rawHtml.match(/<title>([^<]*)<\/title>/i) ||
+                     rawHtml.match(/<meta\s+name=["']title["']\s+content=["']([^"']*)["']/i) ||
+                     rawHtml.match(/"title":"([^"]*)"/);
+  if (titleMatch) {
+    title = titleMatch[1].replace(' - YouTube', '').trim();
+  }
+
+  // 3. Author / Channel
+  const authorMatch = rawHtml.match(/<link\s+itemprop=["']name["']\s+content=["']([^"']*)["']/i) ||
+                      rawHtml.match(/"author":"([^"]*)"/) ||
+                      rawHtml.match(/"ownerChannelName":"([^"]*)"/);
+  if (authorMatch) author = authorMatch[1].trim();
+
+  // 4. Duration
+  const lengthMatch = rawHtml.match(/"lengthSeconds":"(\d+)"/);
+  const msMatch = rawHtml.match(/"approxDurationMs":"(\d+)"/);
+  if (lengthMatch) {
+    durationSeconds = parseInt(lengthMatch[1], 10);
+  } else if (msMatch) {
+    durationSeconds = Math.round(parseInt(msMatch[1], 10) / 1000);
+  } else {
+    const isoDuration = rawHtml.match(/itemprop=["']duration["']\s+content=["']PT(?:(\d+)M)?(?:(\d+)S)?["']/i);
+    if (isoDuration) {
+      const mins = parseInt(isoDuration[1] || '0', 10);
+      const secs = parseInt(isoDuration[2] || '0', 10);
+      durationSeconds = mins * 60 + secs;
+    }
+  }
+
+  // 5. Views
+  const viewsMatch = rawHtml.match(/"viewCount":"(\d+)"/) || rawHtml.match(/itemprop=["']interactionCount["']\s+content=["'](\d+)["']/i);
+  if (viewsMatch) viewCount = parseInt(viewsMatch[1], 10);
+
+  // 6. Description
+  const descMatch = rawHtml.match(/<meta\s+name=["']description["']\s+content=["']([^"']*)["']/i) ||
+                    rawHtml.match(/"shortDescription":"([^"]*)"/);
+  if (descMatch) description = descMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"');
+
+  // Fallback tags from title segments if page had no tags
+  if (realTags.length === 0 && title !== 'Unknown Title') {
+    realTags = title
+      .split(/[-–—|/:,•]/)
+      .map((s) => s.trim().toLowerCase())
+      .filter((s) => s.length > 2 && s.length <= 40);
+  }
+
+  const videoId = extractVideoId(videoUrl) || 'dQw4w9WgXcQ';
+  const totalTagChars = realTags.join(',').length;
+  const isMidRollMonetized = durationSeconds >= 480;
+  const genre = detectGenre(`${title} ${realTags.join(' ')}`);
 
   return {
-    isMidRoll,
-    midRollMultiplier,
-    minRPM_INR,
-    maxRPM_INR,
-    minRPM_USD,
-    maxRPM_USD,
-    estimatedMin: currency === 'INR' ? estimatedMinINR : estimatedMinUSD,
-    estimatedMax: currency === 'INR' ? estimatedMaxINR : estimatedMaxUSD,
-    formula: `(${views.toLocaleString()} views / 1,000) × RPM (${currency === 'INR' ? `₹${minRPM_INR}-₹${maxRPM_INR}` : `$${minRPM_USD}-$${maxRPM_USD}`}) × ${isMidRoll ? '1.65 (≥8 min Mid-Rolls active)' : '1.00 (No Mid-Rolls)'}`,
+    url: videoUrl,
+    videoId,
+    title,
+    author,
+    channelUrl: `https://www.youtube.com/results?search_query=${encodeURIComponent(author)}`,
+    thumbnailUrl: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
+    durationSeconds,
+    viewCount,
+    description: description || 'No description provided in metadata.',
+    tags: realTags,
+    totalTagChars,
+    isMidRollMonetized,
+    genre,
+    vulnerabilities: auditCompetitorWeaknesses({ title, description, tags: realTags, totalTagChars, durationSeconds }),
+    counterTitles: generateCounterTitles(title, genre),
+    revenueEst: calculateRevenueGuide(viewCount, genre, isMidRollMonetized),
   };
-};
+}
 
-/**
- * Pre-configured offline HTML samples for instant user testing
- */
-export const SAMPLE_HTML_SOURCES = {
-  tech: `
-    <title>Next.js 15 Full Tutorial - Build a Production SaaS App in 2026 - YouTube</title>
-    <meta name="title" content="Next.js 15 Full Tutorial - Build a Production SaaS App in 2026">
-    <meta name="author" content="CodeLab Academy">
-    <meta name="keywords" content="nextjs, nextjs 15, react 19, web development, javascript tutorial, tailwind css, full stack tutorial, server components, typescript tutorial, saas blueprint">
-    <meta name="description" content="In this comprehensive tutorial, we build a production SaaS web application using Next.js 15, React 19, and Tailwind. Timestamps below.">
-    <span itemprop="duration" content="PT14M35S"></span>
-    <script>var ytInitialPlayerResponse = {"videoDetails":{"videoId":"kXYiU_JCYtU","title":"Next.js 15 Full Tutorial - Build a Production SaaS App in 2026","lengthSeconds":"875","keywords":["nextjs","nextjs 15","react 19","web development","javascript tutorial","tailwind css","full stack tutorial","server components","typescript tutorial","saas blueprint"],"viewCount":"142850","shortDescription":"In this comprehensive tutorial, we build a production SaaS web application using Next.js 15, React 19, and Tailwind."}};</script>
-  `,
-  story: `
-    <title>The Greedy Merchant Story in Telugu - Moral Stories for Kids - Telugu Kathalu - YouTube</title>
-    <meta name="title" content="The Greedy Merchant Story in Telugu - Moral Stories for Kids - Telugu Kathalu">
-    <meta name="author" content="Telugu Animation Studio">
-    <meta name="keywords" content="telugu stories, moral stories, telugu kathalu, animated stories, kids bedtime stories, panchatantra telugu, animated fairy tales, latest telugu kathalu">
-    <meta name="description" content="Watch this classic Telugu moral story of the greedy merchant. Learn why greed leads to sorrow. Subscribe for more Telugu Kathalu.">
-    <span itemprop="duration" content="PT6M20S"></span>
-    <script>var ytInitialPlayerResponse = {"videoDetails":{"videoId":"AbCdEfGhIjK","title":"The Greedy Merchant Story in Telugu - Moral Stories for Kids - Telugu Kathalu","lengthSeconds":"380","keywords":["telugu stories","moral stories","telugu kathalu","animated stories","kids bedtime stories","panchatantra telugu","animated fairy tales","latest telugu kathalu"],"viewCount":"890400","shortDescription":"Watch this classic Telugu moral story of the greedy merchant."}};</script>
-  `,
-};
+export async function fetchCompetitorViaOEmbed(urlOrId: string): Promise<CompetitorData> {
+  const videoId = extractVideoId(urlOrId) || urlOrId.trim();
+  const targetUrl = `https://www.youtube.com/watch?v=${videoId}`;
+
+  // 1. Try Invidious Public API Node first for full metadata
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3500);
+    const res = await fetch(`https://invidious.nerdvpn.de/api/v1/videos/${videoId}`, { signal: controller.signal });
+    clearTimeout(timeout);
+
+    if (res.ok) {
+      const json = await res.json();
+      if (json && json.title) {
+        const rawTags = Array.isArray(json.keywords) ? json.keywords.filter(Boolean) : [];
+        const durationSeconds = parseInt(json.lengthSeconds, 10) || 0;
+        const totalTagChars = rawTags.join(',').length;
+        const isMidRollMonetized = durationSeconds >= 480;
+        const genre = detectGenre(`${json.title} ${rawTags.join(' ')}`);
+        const viewCount = parseInt(json.viewCount, 10) || 125000;
+        const description = json.description || '';
+
+        return {
+          url: targetUrl,
+          videoId,
+          title: json.title,
+          author: json.author || 'Creator Channel',
+          channelUrl: json.authorId ? `https://www.youtube.com/channel/${json.authorId}` : '',
+          thumbnailUrl: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
+          durationSeconds,
+          viewCount,
+          description,
+          tags: rawTags,
+          totalTagChars,
+          isMidRollMonetized,
+          genre,
+          vulnerabilities: auditCompetitorWeaknesses({ title: json.title, description, tags: rawTags, totalTagChars, durationSeconds }),
+          counterTitles: generateCounterTitles(json.title, genre),
+          revenueEst: calculateRevenueGuide(viewCount, genre, isMidRollMonetized),
+        };
+      }
+    }
+  } catch (e) {}
+
+  // 2. Safe Fallback to Public oEmbed (No hardcoded Telugu stories!)
+  try {
+    const res = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(targetUrl)}&format=json`);
+    if (!res.ok) throw new Error('oEmbed unavailable');
+    const data = await res.json();
+
+    const title = data.title || 'Unknown Title';
+    const author = data.author_name || 'Creator';
+    const fallbackTags = title
+      .split(/[-–—|/:,•]/)
+      .map((s: string) => s.trim().toLowerCase())
+      .filter((s: string) => s.length > 2 && s.length <= 40);
+
+    const totalTagChars = fallbackTags.join(',').length;
+    const genre = detectGenre(title);
+
+    return {
+      url: targetUrl,
+      videoId,
+      title,
+      author,
+      channelUrl: data.author_url || '',
+      thumbnailUrl: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
+      durationSeconds: 0,
+      viewCount: 125000,
+      description: 'Metadata restricted by YouTube oEmbed. Paste raw view-source in Mode 2 for all real tags.',
+      tags: fallbackTags,
+      totalTagChars,
+      isMidRollMonetized: false,
+      genre,
+      vulnerabilities: auditCompetitorWeaknesses({ title, description: '', tags: fallbackTags, totalTagChars, durationSeconds: 0 }),
+      counterTitles: generateCounterTitles(title, genre),
+      revenueEst: calculateRevenueGuide(125000, genre, false),
+    };
+  } catch (e) {
+    throw new Error('Unable to inspect video. Please verify the link or paste the view-source HTML in Mode 2.');
+  }
+}
